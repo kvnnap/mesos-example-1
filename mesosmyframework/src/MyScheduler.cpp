@@ -72,19 +72,23 @@ void MyScheduler::resourceOffers (
 	const vector<Offer>& offers
 )
 {
-    cout    << "My Framework: Resource Offers" << endl;
+    cout << "My Framework: Resource Offers" << endl;
+    
+    // Call stop here as calling it from statusUpdate is problematic
+    if (isFinished()) {
+        cout << "My Framework: Stopping Driver, nothing left to schedule!" << endl;
+        driver->stop();
+        return;
+    }
     
     for (const Offer& offer : offers) {
         
         if (waitingTasks.size() == 0) {
             driver->declineOffer(offer.id());
+            cout << "My Framework: Declined offer, no tasks" << endl;
             continue;
         }
         
-        for (const Resource& resource : offer.resources()) {
-            cout << resource.name() << "-" << resource.scalar().value() << endl;
-        }
-
         vector<TaskInfo> taskInfoList;
         Resources offeredResources = offer.resources();
         while (offeredResources.contains(resourcesPerTask) && waitingTasks.size() > 0) {
@@ -95,13 +99,24 @@ void MyScheduler::resourceOffers (
             waitingTasks.pop_front();
         }
         
-        cout << "My Framework: Will run task/s on slave ID: " << offer.slave_id().value() << endl;
-        /*Status status = */driver->launchTasks(offer.id(), taskInfoList);
+        if (taskInfoList.size() == 0) {
+            driver->declineOffer(offer.id());
+            cout << "My Framework: Declined offer, not suitable for the task/s" << endl;
+        } else {
+            cout << "My Framework: Accepting some or all of resources from offer:" << endl;
+            for (const Resource& resource : offer.resources()) {
+                cout << resource.name() << "-" << resource.scalar().value() << endl;
+            }
+            cout << "My Framework: Will run task/s on slave ID: " << offer.slave_id().value() << endl;
+            /*Status status = */driver->launchTasks(offer.id(), taskInfoList);
+
+            // Either execute command or executor
+            //taskInfo.mutable_executor()->MergeFrom(executorInfo);
+            //taskInfo.mutable_command()->set_value("sleep 30");
+            //cout << "Driver Status: " << status << endl;
+        }
         
-        // Either execute command or executor
-        //taskInfo.mutable_executor()->MergeFrom(executorInfo);
-        //taskInfo.mutable_command()->set_value("sleep 30");
-        //cout << "Driver Status: " << status << endl;
+        
     }
     
 }
@@ -167,22 +182,14 @@ void MyScheduler::statusUpdate (
             }
             result /= numTasks;
             cout << "My Framework: Result is: " << result << endl;
+            cout << "Awaiting next offer to stop framework" << endl;
             
             //driver->stop();
-            
-            driver->suppressOffers();
-            cout << "My Framework: Offers Suppressed" << endl;
             
             // Need to call stop asynchronously as status in UI is inconsistent
             // Calling stop now results in TASK_KILLED in some parts of the 
             // Mesos WEB UI. This must be some bug.
-            thread t ([driver] () -> void {
-                cout << "My Framework: Cooling down for 1 second" << endl;
-                this_thread::sleep_for(chrono::seconds(1));
-                cout << "My Framework: Stopping Driver" << endl;
-                driver->stop();
-            });
-            t.detach();
+            // Calling stop in resourceOffers method
             
         }
             break;
@@ -198,14 +205,14 @@ void MyScheduler::statusUpdate (
                 }
             );
             if (item == runningTasks.end()) {
-                cout << "STATUPDATE ERROR: TASK NOT FOUND!!!!!" << endl;
+                cout << "My Framework: STATUPDATE ERROR: TASK NOT FOUND!!!!! Cannot ReQueue" << endl;
             } else {
                 // move this item
                 waitingTasks.push_back(move(*item));
                 runningTasks.erase(item);
+                cout << "My Framework: Task ERROR (ReQueued) ID: " << status.task_id().value() << endl;
             }
         }
-        cout << "My Framework: Task ERROR (ReQueued) ID: " << status.task_id().value() << endl;
             break;
         default:
             cout << "Unknown Task Status Value" << endl;
